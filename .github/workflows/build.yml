@@ -14,12 +14,17 @@ jobs:
     - name: Checkout OpenWrt source
       run: |
         git clone --branch v19.07.10 https://github.com/openwrt/openwrt.git openwrt
+        
     - name: Install build dependencies
       run: |
         sudo apt update
         sudo apt install -y build-essential flex bison gawk gettext \
-          libncurses-dev libssl-dev python2 python2-minimal python-is-python2 \
+          libncurses-dev libssl-dev python2 python2-minimal \
           rsync unzip file wget
+        # Make python command point to python2
+        sudo update-alternatives --install /usr/bin/python python /usr/bin/python2 1
+        sudo update-alternatives --set python /usr/bin/python2
+
 
 
     - name: Apply OpenWrt config
