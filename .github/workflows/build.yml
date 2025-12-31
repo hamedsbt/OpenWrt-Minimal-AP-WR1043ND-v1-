@@ -8,48 +8,30 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - name: Checkout your repo
+    - name: Checkout repo
       uses: actions/checkout@v4
 
-    - name: Checkout OpenWrt
-      uses: actions/checkout@v4
-      with:
-        repository: openwrt/openwrt
-        ref: v19.07.10
-        path: openwrt
-
-    - name: List repo files
-      run: ls -R configs
-
-    - name: Apply OpenWrt config
-      working-directory: openwrt
+    - name: Checkout OpenWrt source
       run: |
-        cp ../configs/openwrt.config .config
-        make defconfig
+        git clone --branch v19.07.10 https://github.com/openwrt/openwrt.git openwrt
 
     - name: Install build dependencies
       run: |
         sudo apt update
-        sudo apt install -y python2 build-essential flex bison gawk gettext \
-        libncurses-dev libssl-dev python3 python3-distutils python3-setuptools \
-        python-is-python3 rsync unzip file wget
-        sudo ln -sf /usr/bin/python2 /usr/bin/python
+        sudo apt install -y build-essential flex bison gawk gettext \
+          libncurses-dev libssl-dev python3 python3-distutils python3-setuptools \
+          python-is-python3 rsync unzip file wget
 
+    - name: Copy configs into OpenWrt tree
+      run: |
+        cp ../configs/openwrt.config openwrt/.config
+        cp -r ../files/* openwrt/files/
+        cat ../kernel/ar71xx-minimal-kernel.conf >> openwrt/target/linux/ar71xx/config-4.14
 
-    - name: Update feeds
+    - name: Build OpenWrt firmware
       working-directory: openwrt
       run: |
-        ./scripts/feeds update -a
-        ./scripts/feeds install -a
-
-    - name: Apply kernel trimming
-      working-directory: openwrt
-      run: |
-        cat ../kernel/ar71xx-minimal-kernel.conf >> target/linux/ar71xx/config-4.14
-
-    - name: Build firmware
-      working-directory: openwrt
-      run: |
+        make defconfig
         make -j$(nproc)
 
     - name: Upload firmware
