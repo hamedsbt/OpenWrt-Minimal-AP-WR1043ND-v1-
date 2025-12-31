@@ -22,11 +22,95 @@ jobs:
           libncurses-dev libssl-dev python3 python3-distutils python3-setuptools \
           python-is-python3 rsync unzip file wget
 
-    - name: Copy configs into OpenWrt tree
+    - name: Apply OpenWrt config
       run: |
-        cp -r ../files/* openwrt/files/
-        cat ../kernel/ar71xx-minimal-kernel.conf >> openwrt/target/linux/ar71xx/config-4.14
-        cp ../configs/openwrt.config openwrt/.config
+        cat << 'EOF' > openwrt/.config
+        CONFIG_TARGET_ar71xx=y
+        CONFIG_TARGET_ar71xx_generic=y
+        CONFIG_TARGET_ar71xx_generic_DEVICE_tl-wr1043nd-v1=y
+        
+        CONFIG_BUSYBOX=y
+        CONFIG_DROPBEAR=y
+        CONFIG_UBUS=y
+        CONFIG_UBUSD=y
+        CONFIG_UCI=y
+        
+        CONFIG_PACKAGE_kmod-ath9k=y
+        CONFIG_PACKAGE_wpad-basic-wolfssl=y
+        CONFIG_PACKAGE_iw=y
+        CONFIG_PACKAGE_swconfig=y
+        
+        # Explicit removals
+        # CONFIG_PACKAGE_luci is not set
+        # CONFIG_PACKAGE_uhttpd is not set
+        # CONFIG_PACKAGE_firewall is not set
+        # CONFIG_PACKAGE_dnsmasq is not set
+        # CONFIG_PACKAGE_odhcpd is not set
+        # CONFIG_PACKAGE_ppp is not set
+        # CONFIG_PACKAGE_ip6tables is not set
+        # CONFIG_PACKAGE_iptables is not set
+        EOF
+
+    - name: Apply kernel trimming
+      run: |
+        cat << 'EOF' >> openwrt/target/linux/ar71xx/config-4.14
+        CONFIG_NETFILTER=n
+        CONFIG_NETFILTER_ADVANCED=n
+        CONFIG_NF_CONNTRACK=n
+        CONFIG_NF_NAT=n
+        CONFIG_IP_NF_IPTABLES=n
+        CONFIG_BRIDGE_NETFILTER=n
+        
+        CONFIG_IPV6=n
+        
+        CONFIG_INET=y
+        CONFIG_BRIDGE=y
+        
+        CONFIG_MAC80211=y
+        CONFIG_CFG80211=y
+        
+        CONFIG_DEBUG_KERNEL=n
+        CONFIG_CGROUPS=n
+        EOF
+
+    - name: Embed system configs
+      run: |
+        mkdir -p openwrt/files/etc/config
+        cat << 'EOF' > openwrt/files/etc/config/network
+        config switch
+            option name 'switch0'
+            option reset '1'
+            option enable_vlan '1'
+        
+        config switch_vlan
+            option device 'switch0'
+            option vlan '1'
+            option ports '0 1 2 3 4'
+        
+        config interface 'lan'
+            option type 'bridge'
+            option ifname 'eth0.1'
+            option proto 'static'
+            option ipaddr '192.168.10.1'
+            option netmask '255.255.255.0'
+        EOF
+
+        cat << 'EOF' > openwrt/files/etc/config/wireless
+        config wifi-device 'radio0'
+            option type 'mac80211'
+            option channel '6'
+            option hwmode '11ng'
+            option htmode 'HT20'
+            option path 'platform/ar934x_wmac'
+        
+        config wifi-iface
+            option device 'radio0'
+            option mode 'ap'
+            option network 'lan'
+            option ssid 'AP_ONLY'
+            option encryption 'psk2'
+            option key 'strongpassword'
+        EOF
 
     - name: Build OpenWrt firmware
       working-directory: openwrt
