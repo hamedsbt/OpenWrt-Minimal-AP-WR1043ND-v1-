@@ -24,9 +24,9 @@ jobs:
 
     - name: Copy configs into OpenWrt tree
       run: |
-        cp ../configs/openwrt.config openwrt/.config
         cp -r ../files/* openwrt/files/
         cat ../kernel/ar71xx-minimal-kernel.conf >> openwrt/target/linux/ar71xx/config-4.14
+        cp ../configs/openwrt.config openwrt/.config
 
     - name: Build OpenWrt firmware
       working-directory: openwrt
