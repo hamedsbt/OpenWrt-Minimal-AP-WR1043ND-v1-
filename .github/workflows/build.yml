@@ -8,19 +8,23 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
+    - name: Checkout your repo
+      uses: actions/checkout@v4
+
     - name: Checkout OpenWrt
       uses: actions/checkout@v4
       with:
         repository: openwrt/openwrt
         ref: v19.07.10
-        
+        path: openwrt
+
     - name: List repo files
       run: ls -R configs
 
     - name: Apply OpenWrt config
-      working-directory: ${{ github.workspace }}
+      working-directory: openwrt
       run: |
-        cp configs/openwrt.config .config
+        cp ../configs/openwrt.config .config
         make defconfig
 
     - name: Install build dependencies
@@ -31,15 +35,18 @@ jobs:
         python-is-python3 rsync unzip file wget
 
     - name: Update feeds
+      working-directory: openwrt
       run: |
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
     - name: Apply kernel trimming
+      working-directory: openwrt
       run: |
-        cat kernel/ar71xx-minimal-kernel.conf >> target/linux/ar71xx/config-4.14
-        
+        cat ../kernel/ar71xx-minimal-kernel.conf >> target/linux/ar71xx/config-4.14
+
     - name: Build firmware
+      working-directory: openwrt
       run: |
         make -j$(nproc)
 
@@ -47,4 +54,4 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: openwrt-wr1043nd-v1-minimal
-        path: bin/targets/ar71xx/generic/*.bin
+        path: openwrt/bin/targets/ar71xx/generic/*.bin
