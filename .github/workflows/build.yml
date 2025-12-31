@@ -29,7 +29,7 @@ jobs:
 
     - name: Apply OpenWrt config
       run: |
-        cp config/openwrt.config .config
+        cp configs/openwrt.config .config
         make defconfig
 
     - name: Apply kernel trimming
