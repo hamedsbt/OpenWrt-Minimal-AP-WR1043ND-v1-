@@ -15,7 +15,7 @@ jobs:
         ref: v19.07.10
         
     - name: List repo files
-      run: ls -R
+      run: ls -R configs
 
     - name: Apply OpenWrt config
       working-directory: ${{ github.workspace }}
