@@ -1,0 +1,49 @@
+name: OpenWrt Minimal AP (WR1043ND v1)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Checkout OpenWrt
+      uses: actions/checkout@v4
+      with:
+        repository: openwrt/openwrt
+        ref: v19.07.10
+
+    - name: Install build dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y build-essential flex bison gawk gettext \
+        libncurses-dev libssl-dev python rsync unzip file wget
+
+    - name: Update feeds
+      run: |
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: Apply OpenWrt config
+      run: |
+        cp configs/openwrt.config .config
+        make defconfig
+
+    - name: Apply kernel trimming
+      run: |
+        cat kernel/ar71xx-minimal-kernel.conf >> target/linux/ar71xx/config-4.14
+
+    - name: Embed system configs
+      run: |
+        cp -r files .
+
+    - name: Build firmware
+      run: |
+        make -j$(nproc)
+
+    - name: Upload firmware
+      uses: actions/upload-artifact@v4
+      with:
+        name: openwrt-wr1043nd-v1-minimal
+        path: bin/targets/ar71xx/generic/*.bin
