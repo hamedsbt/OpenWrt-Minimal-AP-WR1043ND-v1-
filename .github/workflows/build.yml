@@ -35,10 +35,16 @@ jobs:
     - name: Apply kernel trimming
       run: |
         cat kernel/ar71xx-minimal-kernel.conf >> target/linux/ar71xx/config-4.14
+        
+    - name: List repo files
+      run: ls -R
 
-    - name: Embed system configs
+    - name: Apply OpenWrt config
+      working-directory: ${{ github.workspace }}
       run: |
-        cp -r files .
+        cp configs/openwrt.config .config
+        make defconfig
+
 
     - name: Build firmware
       run: |
