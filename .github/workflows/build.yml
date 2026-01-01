@@ -25,8 +25,6 @@ jobs:
         sudo update-alternatives --install /usr/bin/python python /usr/bin/python2 1
         sudo update-alternatives --set python /usr/bin/python2
 
-
-
     - name: Apply OpenWrt config
       run: |
         cat << 'EOF' > openwrt/.config
@@ -116,12 +114,24 @@ jobs:
             option encryption 'psk2'
             option key 'strongpassword'
         EOF
+        
+    - name: Update feeds
+      working-directory: openwrt
+      run: |
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
 
-    - name: Build OpenWrt firmware
+    - name: Build OpenWrt firmware (debug)
       working-directory: openwrt
       run: |
         make defconfig
-        make -j$(nproc)
+        make -j1 V=s 2>&1 | tee build.log
+        
+    - name: Upload build log
+      uses: actions/upload-artifact@v4
+      with:
+        name: openwrt-build-log
+        path: openwrt/build.log
 
     - name: Upload firmware
       uses: actions/upload-artifact@v4
