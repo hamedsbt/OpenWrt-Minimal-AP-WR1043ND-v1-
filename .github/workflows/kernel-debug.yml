@@ -1,0 +1,91 @@
+name: OpenWrt Kernel Debug (WR1043ND v1)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  kernel:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Checkout OpenWrt
+      run: |
+        git clone --branch v19.07.10 https://github.com/openwrt/openwrt.git openwrt
+
+    - name: Install build dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y \
+          build-essential flex bison gawk gettext \
+          libncurses-dev libssl-dev python2 python2-minimal \
+          rsync unzip file wget
+        sudo update-alternatives --install /usr/bin/python python /usr/bin/python2 1
+        sudo update-alternatives --set python /usr/bin/python2
+
+    - name: Target selection only
+      run: |
+        cat << 'EOF' > openwrt/.config
+        CONFIG_TARGET_ar71xx=y
+        CONFIG_TARGET_ar71xx_generic=y
+        CONFIG_TARGET_ar71xx_generic_DEVICE_tl-wr1043nd-v1=y
+        EOF
+
+    - name: Kernel config fragment (debug)
+      run: |
+        TARGET_DIR="openwrt/target/linux/ar71xx/config-4.14"
+        FRAG="$TARGET_DIR/99-kernel-debug"
+
+        # Repair path if previously polluted
+        if [ -e "$TARGET_DIR" ] && [ ! -d "$TARGET_DIR" ]; then
+          mv "$TARGET_DIR" "${TARGET_DIR}.bak-$(date +%s)"
+        fi
+
+        mkdir -p "$TARGET_DIR"
+
+        cat > "$FRAG" <<'EOF'
+        CONFIG_MODULES=y
+        
+        # Architecture baseline (avoid choice prompts)
+        CONFIG_CPU_LITTLE_ENDIAN=y
+        CONFIG_CPU_BIG_ENDIAN=n
+        
+        # Networking baseline
+        CONFIG_INET=y
+        CONFIG_BRIDGE=y
+        CONFIG_IPV6=n
+        
+        # Disable firewall/netfilter
+        CONFIG_NETFILTER=n
+        CONFIG_NETFILTER_ADVANCED=n
+        
+        # Wireless baseline (modules)
+        CONFIG_MAC80211=m
+        CONFIG_CFG80211=m
+        
+        # Silence cfg80211 prompts
+        CONFIG_NL80211_TESTMODE=n
+        CONFIG_CFG80211_DEVELOPER_WARNINGS=n
+        CONFIG_CFG80211_CERTIFICATION_ONUS=n
+        
+        # Silence misc prompts seen on 4.14
+        CONFIG_ARC_CONSOLE=n
+        CONFIG_DEBUG_KERNEL=n
+        CONFIG_CGROUPS=n
+        EOF
+
+    - name: Prepare build system
+      working-directory: openwrt
+      run: |
+        make defconfig
+
+    - name: Build kernel only (stop early)
+      working-directory: openwrt
+      run: |
+        # This builds ONLY the kernel, nothing else
+        make target/linux/compile V=s -j1 2>&1 | tee kernel-build.log
+
+    - name: Upload kernel log
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel-build-log
+        path: openwrt/kernel-build.log
