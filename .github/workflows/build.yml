@@ -54,12 +54,23 @@ jobs:
         # CONFIG_PACKAGE_iptables is not set
         EOF
     
-    - name: Apply kernel config overrides
+    - name: Apply kernel config overrides (robust)
       run: |
-        mkdir -p openwrt/target/linux/ar71xx/config-4.14
-        cat << 'EOF' > openwrt/target/linux/ar71xx/config-4.14/99-minimal-ap
-        CONFIG_MODULES=y
+        TARGET_DIR="openwrt/target/linux/ar71xx/config-4.14"
+        FRAG="$TARGET_DIR/99-minimal-ap"
     
+        # If a plain file exists where we expect a directory, back it up and remove it.
+        if [ -e "$TARGET_DIR" ] && [ ! -d "$TARGET_DIR" ]; then
+          echo "Found file at $TARGET_DIR (not a directory). Backing up to ${TARGET_DIR}.file-bak"
+          mv "$TARGET_DIR" "${TARGET_DIR}.file-bak-$(date +%s)"
+        fi
+    
+        mkdir -p "$TARGET_DIR"
+    
+        # Write a deterministic fragment (overwrite if already present).
+        cat > "$FRAG" <<'EOF'
+        CONFIG_MODULES=y
+        
         # Disable firewall / netfilter
         CONFIG_NETFILTER=n
         CONFIG_NETFILTER_ADVANCED=n
@@ -67,27 +78,29 @@ jobs:
         CONFIG_NF_NAT=n
         CONFIG_IP_NF_IPTABLES=n
         CONFIG_BRIDGE_NETFILTER=n
-    
+        
         # Disable IPv6
         CONFIG_IPV6=n
-    
+        
         # Required networking
         CONFIG_INET=y
         CONFIG_BRIDGE=y
-    
-        # Wireless stack
+        
+        # Wireless stack as modules (safer for ar71xx / small flash/RAM)
         CONFIG_MAC80211=m
         CONFIG_CFG80211=m
-    
-        # Silence ALL cfg80211 interactive options
+        
+        # Silence cfg80211 interactive options
         CONFIG_NL80211_TESTMODE=n
         CONFIG_CFG80211_DEVELOPER_WARNINGS=n
         CONFIG_CFG80211_CERTIFICATION_ONUS=n
-    
+        
         # Kernel trimming
         CONFIG_DEBUG_KERNEL=n
         CONFIG_CGROUPS=n
         EOF
+
+        echo "Wrote kernel fragment: $FRAG"
 
     - name: Embed system configs
       run: |
