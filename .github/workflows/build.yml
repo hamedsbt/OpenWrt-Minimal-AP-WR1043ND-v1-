@@ -1,4 +1,4 @@
-name: OpenWrt Minimal AP (WR1043ND v1)
+name: OpenWrt Minimal AP (WR1043ND v1, ath79)
 
 on:
   workflow_dispatch:
@@ -11,114 +11,74 @@ jobs:
     - name: Checkout repo
       uses: actions/checkout@v4
 
-    - name: Checkout OpenWrt source
+    - name: Clone OpenWrt (19.07.10)
       run: |
         git clone --branch v19.07.10 https://github.com/openwrt/openwrt.git openwrt
-        
+
     - name: Install build dependencies
       run: |
         sudo apt update
-        sudo apt install -y build-essential flex bison gawk gettext \
+        sudo apt install -y \
+          build-essential clang flex bison gawk gettext \
           libncurses-dev libssl-dev python2 python2-minimal \
           rsync unzip file wget
-        # Make python command point to python2
+
         sudo update-alternatives --install /usr/bin/python python /usr/bin/python2 1
         sudo update-alternatives --set python /usr/bin/python2
 
-    - name: Apply OpenWrt config
+    - name: Configure OpenWrt (ath79 minimal)
       run: |
         cat << 'EOF' > openwrt/.config
-        CONFIG_TARGET_ar71xx=y
-        CONFIG_TARGET_ar71xx_generic=y
-        CONFIG_TARGET_ar71xx_generic_DEVICE_tl-wr1043nd-v1=y
-        
+        # Target
+        CONFIG_TARGET_ath79=y
+        CONFIG_TARGET_ath79_generic=y
+        CONFIG_TARGET_ath79_generic_DEVICE_tplink_tl-wr1043nd-v1=y
+
+        # Minimal system
         CONFIG_BUSYBOX=y
         CONFIG_DROPBEAR=y
         CONFIG_UBUS=y
         CONFIG_UBUSD=y
         CONFIG_UCI=y
-        
+        CONFIG_LOGD=y
+        CONFIG_PROCD=y
+
+        # Wireless (modular)
         CONFIG_PACKAGE_kmod-ath9k=y
+        CONFIG_PACKAGE_kmod-mac80211=y
+        CONFIG_PACKAGE_kmod-cfg80211=y
         CONFIG_PACKAGE_wpad-basic-wolfssl=y
         CONFIG_PACKAGE_iw=y
+
+        # Switch / Ethernet
         CONFIG_PACKAGE_swconfig=y
-        
+
         # Explicit removals
         # CONFIG_PACKAGE_luci is not set
-        # CONFIG_PACKAGE_uhttpd is not set
-        # CONFIG_PACKAGE_firewall is not set
         # CONFIG_PACKAGE_dnsmasq is not set
+        # CONFIG_PACKAGE_firewall is not set
         # CONFIG_PACKAGE_odhcpd is not set
         # CONFIG_PACKAGE_ppp is not set
         # CONFIG_PACKAGE_ip6tables is not set
         # CONFIG_PACKAGE_iptables is not set
-        EOF
-    
-    - name: Apply kernel config overrides (robust)
-      run: |
-        TARGET_DIR="openwrt/target/linux/ar71xx/config-4.14"
-        FRAG="$TARGET_DIR/99-minimal-ap"
-    
-        # If a plain file exists where we expect a directory, back it up and remove it.
-        if [ -e "$TARGET_DIR" ] && [ ! -d "$TARGET_DIR" ]; then
-          echo "Found file at $TARGET_DIR (not a directory). Backing up to ${TARGET_DIR}.file-bak"
-          mv "$TARGET_DIR" "${TARGET_DIR}.file-bak-$(date +%s)"
-        fi
-    
-        mkdir -p "$TARGET_DIR"
-    
-        # Write a deterministic fragment (overwrite if already present).
-        cat > "$FRAG" <<'EOF'
-        CONFIG_MODULES=y
-        
-        # Disable firewall / netfilter
-        CONFIG_NETFILTER=n
-        CONFIG_NETFILTER_ADVANCED=n
-        CONFIG_NF_CONNTRACK=n
-        CONFIG_NF_NAT=n
-        CONFIG_IP_NF_IPTABLES=n
-        CONFIG_BRIDGE_NETFILTER=n
-        
-        # Disable IPv6
+
+        # IPv6 off
         CONFIG_IPV6=n
-        
-        # Required networking
-        CONFIG_INET=y
-        CONFIG_BRIDGE=y
-        
-        # Wireless stack as modules (safer for ar71xx / small flash/RAM)
-        CONFIG_MAC80211=m
-        CONFIG_CFG80211=m
-        
-        # Silence cfg80211 interactive options
-        CONFIG_NL80211_TESTMODE=n
-        CONFIG_CFG80211_DEVELOPER_WARNINGS=n
-        CONFIG_CFG80211_CERTIFICATION_ONUS=n
-        
-        # Kernel trimming
-        CONFIG_DEBUG_KERNEL=n
-        CONFIG_CGROUPS=n
+
+        # Kernel size reduction
+        CONFIG_VMLINUX_STRIP=y
+        CONFIG_KERNEL_PRINTK=n
+        CONFIG_KERNEL_DEBUG_FS=n
         EOF
 
-        echo "Wrote kernel fragment: $FRAG"
-
-    - name: Embed system configs
+    - name: Embed system configuration
       run: |
         mkdir -p openwrt/files/etc/config
+
         cat << 'EOF' > openwrt/files/etc/config/network
-        config switch
-            option name 'switch0'
-            option reset '1'
-            option enable_vlan '1'
-        
-        config switch_vlan
-            option device 'switch0'
-            option vlan '1'
-            option ports '0 1 2 3 4'
-        
         config interface 'lan'
             option type 'bridge'
-            option ifname 'eth0.1'
+            option ifname 'eth0'
             option proto 'static'
             option ipaddr '192.168.10.1'
             option netmask '255.255.255.0'
@@ -130,8 +90,7 @@ jobs:
             option channel '6'
             option hwmode '11ng'
             option htmode 'HT20'
-            option path 'platform/ar934x_wmac'
-        
+
         config wifi-iface
             option device 'radio0'
             option mode 'ap'
@@ -140,27 +99,21 @@ jobs:
             option encryption 'psk2'
             option key 'strongpassword'
         EOF
-        
-    - name: Update feeds
+
+    - name: Update and install feeds
       working-directory: openwrt
       run: |
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: Build OpenWrt firmware (debug)
+    - name: Build OpenWrt (single-thread, verbose)
       working-directory: openwrt
       run: |
         make defconfig
-        make -j1 V=s 2>&1 | tee build.log
-        
-    - name: Upload build log
-      uses: actions/upload-artifact@v4
-      with:
-        name: openwrt-build-log
-        path: openwrt/build.log
+        make -j1 V=s
 
     - name: Upload firmware
       uses: actions/upload-artifact@v4
       with:
-        name: openwrt-wr1043nd-v1-minimal
-        path: openwrt/bin/targets/ar71xx/generic/*.bin
+        name: wr1043nd-v1-ath79-minimal
+        path: openwrt/bin/targets/ath79/generic/*.bin
