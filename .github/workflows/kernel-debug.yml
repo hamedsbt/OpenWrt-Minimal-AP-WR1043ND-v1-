@@ -77,12 +77,17 @@ jobs:
       working-directory: openwrt
       run: |
         make defconfig
-
-    - name: Build kernel only (stop early)
+      
+    - name: Build toolchain (required for kernel)
       working-directory: openwrt
       run: |
-        # This builds ONLY the kernel, nothing else
-        make target/linux/compile V=s -j1 2>&1 | tee kernel-build.log
+        # This is mandatory; kernel cannot build without it
+        make toolchain/install -j$(nproc) V=s
+    
+    - name: Build kernel only
+      working-directory: openwrt
+      run: |
+        make target/linux/compile -j$(nproc) V=s 2>&1 | tee kernel-build.log
 
     - name: Upload kernel log
       uses: actions/upload-artifact@v4
