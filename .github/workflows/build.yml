@@ -57,24 +57,36 @@ jobs:
     - name: Apply kernel trimming
       run: |
         cat << 'EOF' >> openwrt/target/linux/ar71xx/config-4.14
+        # Enable loadable module support (required for kmod-* packages)
+        CONFIG_MODULES=y
+
+        # Networking / firewall primitives (kept disabled as requested)
         CONFIG_NETFILTER=n
         CONFIG_NETFILTER_ADVANCED=n
         CONFIG_NF_CONNTRACK=n
         CONFIG_NF_NAT=n
         CONFIG_IP_NF_IPTABLES=n
         CONFIG_BRIDGE_NETFILTER=n
-        
+
+        # IPv6 disabled
         CONFIG_IPV6=n
-        
+
+        # Basic networking required
         CONFIG_INET=y
         CONFIG_BRIDGE=y
-        
+
+        # Wireless stack (if you prefer modules, change =y to =m for mac80211/cfg80211)
         CONFIG_MAC80211=y
         CONFIG_CFG80211=y
-        
+
+        # Explicitly set NL80211_TESTMODE so silentoldconfig won't prompt
+        CONFIG_NL80211_TESTMODE=n
+
+        # General kernel trimming
         CONFIG_DEBUG_KERNEL=n
         CONFIG_CGROUPS=n
         EOF
+
 
     - name: Embed system configs
       run: |
