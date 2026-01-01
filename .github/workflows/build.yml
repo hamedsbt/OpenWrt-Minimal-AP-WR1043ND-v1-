@@ -53,40 +53,41 @@ jobs:
         # CONFIG_PACKAGE_ip6tables is not set
         # CONFIG_PACKAGE_iptables is not set
         EOF
-
-    - name: Apply kernel trimming
+    
+    - name: Apply kernel config overrides
       run: |
-        cat << 'EOF' >> openwrt/target/linux/ar71xx/config-4.14
-        # Enable loadable module support (required for kmod-* packages)
+        mkdir -p openwrt/target/linux/ar71xx/config-4.14
+        cat << 'EOF' > openwrt/target/linux/ar71xx/config-4.14/99-minimal-ap
         CONFIG_MODULES=y
-
-        # Networking / firewall primitives (kept disabled as requested)
+    
+        # Disable firewall / netfilter
         CONFIG_NETFILTER=n
         CONFIG_NETFILTER_ADVANCED=n
         CONFIG_NF_CONNTRACK=n
         CONFIG_NF_NAT=n
         CONFIG_IP_NF_IPTABLES=n
         CONFIG_BRIDGE_NETFILTER=n
-
-        # IPv6 disabled
+    
+        # Disable IPv6
         CONFIG_IPV6=n
-
-        # Basic networking required
+    
+        # Required networking
         CONFIG_INET=y
         CONFIG_BRIDGE=y
-
-        # Wireless stack (if you prefer modules, change =y to =m for mac80211/cfg80211)
-        CONFIG_MAC80211=y
-        CONFIG_CFG80211=y
-
-        # Explicitly set NL80211_TESTMODE so silentoldconfig won't prompt
+    
+        # Wireless stack
+        CONFIG_MAC80211=m
+        CONFIG_CFG80211=m
+    
+        # Silence ALL cfg80211 interactive options
         CONFIG_NL80211_TESTMODE=n
-
-        # General kernel trimming
+        CONFIG_CFG80211_DEVELOPER_WARNINGS=n
+        CONFIG_CFG80211_CERTIFICATION_ONUS=n
+    
+        # Kernel trimming
         CONFIG_DEBUG_KERNEL=n
         CONFIG_CGROUPS=n
         EOF
-
 
     - name: Embed system configs
       run: |
