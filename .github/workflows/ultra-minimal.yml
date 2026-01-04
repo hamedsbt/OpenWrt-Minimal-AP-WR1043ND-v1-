@@ -1,4 +1,4 @@
-name: OpenWrt Minimal AP (WR1043ND v1, ath79 ultra-minimal)
+name: OpenWrt ath79 Ultra-Minimal WR1043ND v1
 
 on:
   workflow_dispatch:
@@ -6,105 +6,94 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    timeout-minutes: 240
 
     steps:
-    - name: Checkout repo
+    - name: Checkout repository
       uses: actions/checkout@v4
-
-    - name: Clone OpenWrt source
-      run: |
-        git clone --branch v19.07.10 https://github.com/openwrt/openwrt.git openwrt
 
     - name: Install build dependencies
       run: |
         sudo apt update
-        sudo apt install -y build-essential clang flex bison gawk gettext \
-          libncurses-dev libssl-dev python2 python2-minimal \
-          rsync unzip file wget
+        sudo apt install -y build-essential clang flex bison gawk gettext git \
+          libncurses-dev libssl-dev python2 python2-minimal rsync unzip file wget \
+          ca-certificates
+        # Ensure "python" is python2 for legacy OpenWrt build scripts
         sudo update-alternatives --install /usr/bin/python python /usr/bin/python2 1
         sudo update-alternatives --set python /usr/bin/python2
 
-    - name: Configure OpenWrt (ultra-minimal ath79)
+    - name: Clone OpenWrt 19.07.10
       run: |
-        cat << 'EOF' > openwrt/.config
-        # Target
+        git clone --branch v19.07.10 https://github.com/openwrt/openwrt.git openwrt
+        cd openwrt
+        git submodule update --init --recursive || true
+
+    - name: Prepare ultra-minimal .config (packages)
+      working-directory: openwrt
+      run: |
+        # Create a minimal package selection. This disables firewall, dnsmasq, odhcpd, swconfig, and common kmods.
+        cat > .config <<'EOF'
         CONFIG_TARGET_ath79=y
         CONFIG_TARGET_ath79_generic=y
         CONFIG_TARGET_ath79_generic_DEVICE_tplink_tl-wr1043nd-v1=y
 
-        # Essential system
+        # Essential base system
         CONFIG_BUSYBOX=y
         CONFIG_DROPBEAR=y
         CONFIG_UBUS=y
         CONFIG_UBUSD=y
         CONFIG_UCI=y
-        CONFIG_LOGD=y
         CONFIG_PROCD=y
+        CONFIG_LOGD=y
 
-        # Wireless stack (modular)
+        # Wireless (keep required kmods)
         CONFIG_PACKAGE_kmod-ath9k=y
         CONFIG_PACKAGE_kmod-mac80211=y
         CONFIG_PACKAGE_kmod-cfg80211=y
         CONFIG_PACKAGE_wpad-basic-wolfssl=y
         CONFIG_PACKAGE_iw=y
 
-        # Networking
+        # Keep bridge utilities for simple flat LAN bridging
         CONFIG_PACKAGE_bridge-utils=y
 
-        # Disable firewall & netfilter completely
-        CONFIG_PACKAGE_firewall=n
-        CONFIG_PACKAGE_iptables=n
-        CONFIG_PACKAGE_ip6tables=n
-        CONFIG_PACKAGE_kmod-ipt-core=n
-        CONFIG_PACKAGE_kmod-ipt-nat=n
-        CONFIG_PACKAGE_kmod-nf-conntrack=n
-        CONFIG_PACKAGE_kmod-nf-nat=n
-        CONFIG_PACKAGE_kmod-br-netfilter=n
+        # Remove userland and packages we don't want
+        # (use '# ... is not set' form to explicitly unselect)
+        # Disable LuCI / web UI
+        # CONFIG_PACKAGE_luci is not set
 
-        # Disable VLAN / swconfig
-        CONFIG_PACKAGE_swconfig=n
+        # Disable firewall and iptables/nft userland
+        # CONFIG_PACKAGE_firewall is not set
+        # CONFIG_PACKAGE_iptables is not set
+        # CONFIG_PACKAGE_ip6tables is not set
+        # CONFIG_PACKAGE_nftables is not set
 
-        # Disable DHCP/DNS
-        CONFIG_PACKAGE_dnsmasq=n
-        CONFIG_PACKAGE_odhcpd=n
+        # Disable DHCP / DNS
+        # CONFIG_PACKAGE_dnsmasq is not set
+        # CONFIG_PACKAGE_odhcpd is not set
 
-        # Disable IPv6
+        # Disable VLAN/switch management
+        # CONFIG_PACKAGE_swconfig is not set
+
+        # Disable PPP / PPPoE userland
+        # CONFIG_PACKAGE_ppp is not set
+        # CONFIG_PACKAGE_pppoe is not set
+
+        # Disable USB-related packages (userland)
+        # CONFIG_PACKAGE_kmod-usb-core is not set
+        # CONFIG_PACKAGE_kmod-usb-storage is not set
+
+        # Disable IPv6 at package level
         CONFIG_IPV6=n
 
-        # Kernel size reduction
+        # Kernel size trimming
         CONFIG_VMLINUX_STRIP=y
         CONFIG_KERNEL_PRINTK=n
         CONFIG_KERNEL_DEBUG_FS=n
         EOF
 
-    - name: Embed system configuration
-      run: |
-        mkdir -p openwrt/files/etc/config
-
-        cat << 'EOF' > openwrt/files/etc/config/network
-        config interface 'lan'
-            option type 'bridge'
-            option ifname 'eth0'
-            option proto 'static'
-            option ipaddr '192.168.10.1'
-            option netmask '255.255.255.0'
-        EOF
-
-        cat << 'EOF' > openwrt/files/etc/config/wireless
-        config wifi-device 'radio0'
-            option type 'mac80211'
-            option channel '6'
-            option hwmode '11ng'
-            option htmode 'HT20'
-
-        config wifi-iface
-            option device 'radio0'
-            option mode 'ap'
-            option network 'lan'
-            option ssid 'AP_ONLY'
-            option encryption 'psk2'
-            option key 'strongpassword'
-        EOF
+        # Show what we wrote
+        echo "Wrote openwrt/.config (first 200 lines):"
+        sed -n '1,200p' .config || true
 
     - name: Update and install feeds
       working-directory: openwrt
@@ -112,13 +101,118 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: Build OpenWrt firmware (single-thread, verbose)
+    - name: Apply kernel config overrides (disable netfilter, USB, PPP, etc.)
+      working-directory: openwrt
+      run: |
+        set -euo pipefail
+        TARGET_BASE="target/linux/ath79"
+        # detect kernel config directory (config-<version>) under target/linux/ath79
+        KCONF_DIR=""
+        for d in $TARGET_BASE/config-*; do
+          [ -d "$d" ] && KCONF_DIR="$d" && break
+        done
+        if [ -z "$KCONF_DIR" ]; then
+          # fallback: some trees may use config-5.4 or config-4.14 as a file; create config-5.4 dir safely
+          KCONF_DIR="$TARGET_BASE/config-5.4"
+        fi
+
+        # If path exists as a file (not dir), move it aside and create directory
+        if [ -e "$KCONF_DIR" ] && [ ! -d "$KCONF_DIR" ]; then
+          echo "Found file at $KCONF_DIR; backing up and replacing with directory"
+          mv "$KCONF_DIR" "${KCONF_DIR}.bak-$(date +%s)"
+        fi
+
+        mkdir -p "$KCONF_DIR"
+
+        FRAG="$KCONF_DIR/99-ultra-minimal"
+        cat > "$FRAG" <<'EOF'
+        # keep module support (kmods required)
+        CONFIG_MODULES=y
+        
+        # --- Disable all netfilter/iptables/nft kernel features ---
+        CONFIG_NETFILTER=n
+        CONFIG_NETFILTER_ADVANCED=n
+        CONFIG_NETFILTER_XTABLES=n
+        CONFIG_NF_CONNTRACK=n
+        CONFIG_NF_CONNTRACK_IPV4=n
+        CONFIG_NF_CONNTRACK_IPV6=n
+        CONFIG_NF_NAT=n
+        CONFIG_IP_NF_IPTABLES=n
+        CONFIG_IP_NF_NAT=n
+        CONFIG_BRIDGE_NETFILTER=n
+        CONFIG_IP_NAT=n
+        CONFIG_XFRM=n
+        
+        # --- Disable iptables xtables & table modules (defensive) ---
+        CONFIG_IP_NF_TARGET_MASQUERADE=n
+        CONFIG_IP_NF_TARGET_REJECT=n
+        CONFIG_IP_NF_MATCH_ADDRTYPE=n
+        CONFIG_IP_NF_MATCH_AH=n
+        
+        # --- Disable PPP / PPPoE ---
+        CONFIG_PPP=n
+        CONFIG_PPPOE=n
+        CONFIG_PPP_MULTILINK=n
+        CONFIG_PPP_BSDCOMP=n
+        CONFIG_PPP_DEFLATE=n
+        CONFIG_PPP_FILTER=n
+        CONFIG_PPP_MPPE=n
+        
+        # --- Disable USB host controllers and storage (if you do not need USB) ---
+        CONFIG_USB_SUPPORT=n
+        CONFIG_USB_EHCI_HCD=n
+        CONFIG_USB_OHCI_HCD=n
+        CONFIG_USB_UHCI_HCD=n
+        CONFIG_USB_STORAGE=n
+        
+        # --- Disable obscure logging or debug that pulls extra modules ---
+        CONFIG_NF_LOG_IPV4=n
+        CONFIG_NF_LOG_IPV6=n
+        CONFIG_NF_LOG_COMMON=n
+        
+        # Kernel trimming housekeeping
+        CONFIG_DEBUG_KERNEL=n
+        CONFIG_CGROUPS=n
+        EOF
+
+        echo "Wrote kernel fragment: $FRAG"
+        ls -l "$FRAG"
+
+        # Force clean kernel build artifacts so the fragment is used freshly
+        echo "Cleaning previous kernel build dirs (force)"
+        rm -rf build_dir/target-*/linux-*/linux-*
+        ls -ld build_dir/target-* || true
+
+    - name: Prepare build system (defconfig)
       working-directory: openwrt
       run: |
         make defconfig
-        make -j1 V=s
 
-    - name: Upload firmware
+    - name: Build toolchain (required)
+      working-directory: openwrt
+      run: |
+        make toolchain/install -j$(nproc) V=s
+
+    - name: Build kernel only (fast check)
+      working-directory: openwrt
+      run: |
+        # build only target/linux to validate kernel config and module composition
+        make target/linux/compile -j1 V=s 2>&1 | tee kernel-compile.log
+
+    - name: Build full firmware (single-threaded, verbose)
+      working-directory: openwrt
+      run: |
+        make -j1 V=s 2>&1 | tee full-build.log
+
+    - name: Upload logs
+      uses: actions/upload-artifact@v4
+      with:
+        name: openwrt-build-logs
+        path: |
+          openwrt/kernel-compile.log
+          openwrt/full-build.log
+
+    - name: Upload firmware artifacts
       uses: actions/upload-artifact@v4
       with:
         name: wr1043nd-v1-ath79-ultra-minimal
